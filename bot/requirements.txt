@@ -1,0 +1,18 @@
+# Local Discord bot dependencies
+# pip install -r bot/requirements.txt
+
+# Discord
+discord.py>=2.4.0
+
+# Model inference (local)
+# If you have a GPU locally, these will use it. CPU works too (just slower).
+torch>=2.4.0
+transformers>=4.45.0
+accelerate>=1.0.0
+peft>=0.13.0
+
+# Optional: install Unsloth locally for faster inference
+# unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git
+
+# Env + utils
+python-dotenv>=1.0.0

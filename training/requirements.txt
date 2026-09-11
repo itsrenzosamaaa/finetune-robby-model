@@ -1,0 +1,18 @@
+# RunPod fine-tuning dependencies
+# Install via: bash training/runpod_setup.sh
+
+# Unsloth — 2-4x faster fine-tuning, lower VRAM
+unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git
+
+# Core training stack
+transformers>=4.45.0
+trl>=0.12.0
+peft>=0.13.0
+accelerate>=1.0.0
+bitsandbytes>=0.44.0
+
+# Data
+datasets>=3.0.0
+
+# Utils
+huggingface_hub>=0.25.0

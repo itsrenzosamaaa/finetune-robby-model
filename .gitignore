@@ -1,0 +1,22 @@
+# Training data — contains personal messages, never commit
+data/*.jsonl
+data/*.json
+
+# Downloaded/generated model weights
+output/
+
+# Environment secrets
+bot/.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Misc
+*.zip
+*.tar.gz
+.DS_Store
