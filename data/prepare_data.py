@@ -29,6 +29,7 @@ USAGE:
 import json
 import argparse
 import random
+import re
 import glob
 from pathlib import Path
 
@@ -48,7 +49,11 @@ def build_chat_pairs(
     """
     Convert a thread into (prompt, response) pairs where YOU are the assistant.
 
-    Finds messages from others → looks for your next reply.
+    Improvements:
+    - Filters out pairs where prompt or response is too short
+    - Filters out responses that look like load requests, phone numbers, or noise
+    - Skips pairs where messages are too far apart in time (different topics)
+    - Concatenates consecutive messages from the same sender before pairing
     """
     # Filter to text-only, non-unsent messages with actual content
     messages = [
@@ -58,8 +63,22 @@ def build_chat_pairs(
         and m.get("text", "").strip()
     ]
 
-    # Sort by timestamp just in case (ascending = chronological)
+    # Sort by timestamp ascending (chronological)
     messages.sort(key=lambda m: m.get("timestamp", 0))
+
+    # Merge consecutive messages from the same sender into one
+    # (people often send multiple short messages in a row)
+    merged = []
+    for msg in messages:
+        if merged and merged[-1].get("senderName") == msg.get("senderName"):
+            # Check time gap — only merge if within 3 minutes
+            time_gap = msg.get("timestamp", 0) - merged[-1].get("timestamp", 0)
+            if time_gap < 3 * 60 * 1000:  # 3 minutes in ms
+                merged[-1]["text"] = merged[-1]["text"] + " " + msg["text"]
+                merged[-1]["timestamp"] = msg["timestamp"]  # update to latest
+                continue
+        merged.append(dict(msg))
+    messages = merged
 
     pairs = []
     i = 0
@@ -77,20 +96,58 @@ def build_chat_pairs(
                 next_sender = next_msg.get("senderName", "")
                 next_text = next_msg.get("text", "").strip()
 
+                # Skip if too much time passed (>30 min = different conversation topic)
+                time_gap = next_msg.get("timestamp", 0) - msg.get("timestamp", 0)
+                if time_gap > 30 * 60 * 1000:
+                    break
+
                 if next_sender == your_name and len(next_text) >= min_length:
-                    pairs.append({
-                        "prompt": text,
-                        "response": next_text,
-                    })
-                    i = j  # advance past the consumed response
+                    # Quality filters — skip low-quality pairs
+                    if _is_quality_pair(text, next_text):
+                        pairs.append({
+                            "prompt": text,
+                            "response": next_text,
+                        })
+                    i = j
                     break
                 elif next_sender != your_name:
-                    # Someone else replied before you — skip this exchange
                     break
                 j += 1
         i += 1
 
     return pairs
+
+
+# Patterns to filter out noisy responses
+_NOISE_PATTERNS = [
+    r"^\d{10,}$",                    # pure phone numbers
+    r"^(load|paloadi|pa-load)",      # load requests
+    r"^(ok|oo|haha|hehe|lol|wow)$",  # single filler words (too short to learn from)
+    r"^\W+$",                         # only punctuation/symbols
+]
+_NOISE_RE = [re.compile(p, re.IGNORECASE) for p in _NOISE_PATTERNS]
+
+def _is_quality_pair(prompt: str, response: str) -> bool:
+    """Return True if this prompt/response pair is worth training on."""
+    # Both must be at least 3 characters
+    if len(prompt.strip()) < 3 or len(response.strip()) < 3:
+        return False
+
+    # Response must be at least 2 words OR meaningful short reply
+    response_words = response.strip().split()
+    if len(response_words) < 2 and len(response.strip()) < 8:
+        return False
+
+    # Filter noise patterns
+    for pattern in _NOISE_RE:
+        if pattern.search(response.strip()):
+            return False
+
+    # Prompt shouldn't be just a single character/emoji
+    if len(prompt.strip()) < 3:
+        return False
+
+    return True
 
 
 def format_as_chatml(prompt: str, response: str) -> dict:
