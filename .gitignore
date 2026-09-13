@@ -2,6 +2,8 @@
 data/*.jsonl
 data/*.json
 
+inbox/*.json
+
 # Downloaded/generated model weights
 output/
 
