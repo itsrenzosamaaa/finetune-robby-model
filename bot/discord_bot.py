@@ -99,10 +99,18 @@ class ChatModel:
             log.warning("Unsloth not found — falling back to vanilla transformers (slower)")
             from transformers import AutoModelForCausalLM, AutoTokenizer
             import torch
+            from pathlib import Path
 
-            self.tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+            model_path = Path(MODEL_PATH)
+            if not model_path.exists():
+                raise FileNotFoundError(
+                    f"Model not found at: {MODEL_PATH}\n"
+                    f"Run: huggingface-cli download itsrenzosamaaa/robby-chat-model --local-dir output/merged_model"
+                )
+
+            self.tokenizer = AutoTokenizer.from_pretrained(str(model_path))
             self.model = AutoModelForCausalLM.from_pretrained(
-                MODEL_PATH,
+                str(model_path),
                 torch_dtype=torch.float16,
                 device_map="auto",
             )
@@ -112,6 +120,8 @@ class ChatModel:
 
     def generate(self, user_message: str) -> str:
         """Run inference on a single user message."""
+        if not self._loaded or self.tokenizer is None or self.model is None:
+            raise RuntimeError("Model is not loaded yet — try again in a moment")
         messages = [
             {
                 "role": "system",
@@ -183,15 +193,12 @@ async def on_message(message: discord.Message):
 
     # Process commands first (e.g. !chat)
     await bot.process_commands(message)
-
-    # Respond to DMs or @mentions
+    # Respond to DMs, @mentions, or any message in allowed channels
     is_dm = isinstance(message.channel, discord.DMChannel)
     is_mention = bot.user in message.mentions
+    is_allowed = is_allowed_channel(message.channel.id)
 
-    if not (is_dm or is_mention):
-        return
-
-    if not is_allowed_channel(message.channel.id) and not is_dm:
+    if not (is_dm or is_mention or (is_allowed and ALLOWED_CHANNEL_IDS)):
         return
 
     # Strip the @mention from the message
@@ -203,13 +210,22 @@ async def on_message(message: discord.Message):
         await message.reply("ano ba yan, wala kang sinabi 🙄")
         return
 
+    # Model not ready yet — tell the user instead of crashing
+    if not chat_model._loaded:
+        await message.reply("sandali lang, naglo-load pa ako 😴 try mo ulit after 1 minute")
+        return
+
     # Generate response — run in executor to avoid blocking the event loop
+    await message.add_reaction("🤔")  # thinking reaction while generating
     async with message.channel.typing():
         loop = asyncio.get_event_loop()
         try:
             response = await loop.run_in_executor(None, chat_model.generate, content)
+            await message.remove_reaction("🤔", bot.user)  # remove thinking emoji
         except Exception as e:
             log.error(f"Generation error: {e}", exc_info=True)
+            await message.remove_reaction("🤔", bot.user)
+            await message.add_reaction("💀")
             response = "nagcrash ako HAHAHA antay ka muna bro 💀"
 
     await message.reply(response)
@@ -219,6 +235,10 @@ async def on_message(message: discord.Message):
 async def chat_command(ctx: commands.Context, *, message: str):
     """!chat <message> — Chat with the fine-tuned model."""
     if not is_allowed_channel(ctx.channel.id):
+        return
+
+    if not chat_model._loaded:
+        await ctx.reply("sandali lang, naglo-load pa ako 😴 try mo ulit after 1 minute")
         return
 
     async with ctx.typing():
